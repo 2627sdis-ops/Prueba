@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ /app/
 
 # Variable de entorno por defecto
-ENV PYTHONUNBUFFERED=1
+EXPOSE 5000
 
 # Comando de inicio del servidor V2X-SERVICE
 CMD ["python", "server.py"]
