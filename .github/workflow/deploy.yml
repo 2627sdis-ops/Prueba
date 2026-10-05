@@ -1,59 +1,58 @@
-name: CI/CD Pipeline - V2X Service
+name: Build and push V2X-SERVICE
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: v2x-service
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 1. Descargar el código del repositorio
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: 2. Configurar entorno Python
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
-      - name: 3. Instalar dependencias y ejecutar tests unitarios
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pytest app/test_main.py
 
-      - name: 4. Autenticar en AWS
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: 5. Iniciar sesión en Amazon ECR
+      - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: 6. Construir imagen Docker y subir a ECR
+      - name: Build, tag, and push image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: v2x-service
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
 
-      - name: 7. Generar manifiesto de despliegue y subir a S3 (sdisprueba)
-        run: |
-          cat <<EOF > manifest.json
-          {
-            "service": "v2x-service",
-            "version": "${{ github.sha }}",
-            "image_uri": "${{ env.IMAGE_URI }}",
-            "updated_at": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          }
-          EOF
-          aws s3 cp manifest.json s3://sdisprueba/manifest.json
+          # También etiquetamos como latest para facilitar el despliegue manual
+          IMAGE_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker tag "$IMAGE_URI" "$IMAGE_LATEST"
+          docker push "$IMAGE_LATEST"
